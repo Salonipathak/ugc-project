@@ -6,6 +6,7 @@ import { GhostButton, PrimaryButton } from "../components/Buttons";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import api from "../configs/axios";
 import toast from "react-hot-toast";
+import { authHeaders } from "../utils/authHeaders";
 
 const Result = () => {
     const { projectId } = useParams();
@@ -21,7 +22,7 @@ const Result = () => {
         try {
             const token = await getToken();
             const { data } = await api.get(`/api/user/projects/${projectId}`, {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: authHeaders(token, user?.id),
             });
             setProjectData(data.project);
             setIsGenerating(data.project.isGenerating);
@@ -40,7 +41,7 @@ const Result = () => {
                 "/api/project/video",
                 { projectId },
                 {
-                    headers: { Authorization: `Bearer ${token}` },
+                    headers: authHeaders(token, user?.id),
                 }
             );
 

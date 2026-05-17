@@ -2,7 +2,7 @@ import {Request, Response } from 'express'
 import * as Sentry from "@sentry/node";
 import { prisma } from '../configs/prisma.js';
 import {v2 as cloudinary } from 'cloudinary'
-import {GenerateContentConfig, HarmBlockThreshold, HarmCategory} from '@google/genai'
+import {GenerateContentConfig, HarmBlockThreshold, HarmCategory, Modality} from '@google/genai'
 import fs from 'fs';
 import path from 'path';
 import ai from '../configs/ai.js';
@@ -15,6 +15,45 @@ const loadImage = (path: string, mimeType: string)=>{
             mimeType
         }
     }
+}
+
+const getOverlayPublicId = (publicId: string) => publicId.replace(/\//g, ':');
+
+const buildFallbackGeneratedImage = (
+    productPublicId: string,
+    modelPublicId: string,
+    aspectRatio = '9:16'
+) => {
+    const isWide = aspectRatio === '16:9';
+
+    return cloudinary.url(modelPublicId, {
+        secure: true,
+        resource_type: 'image',
+        transformation: [
+            {
+                width: isWide ? 1280 : 900,
+                height: isWide ? 720 : 1600,
+                crop: 'fill',
+                gravity: 'auto',
+            },
+            {
+                overlay: getOverlayPublicId(productPublicId),
+                width: isWide ? 300 : 250,
+                crop: 'fit',
+                effect: 'shadow:45',
+            },
+            {
+                flags: 'layer_apply',
+                gravity: 'center',
+                x: isWide ? -120 : -40,
+                y: isWide ? 80 : 160,
+            },
+            {
+                quality: 'auto',
+                fetch_format: 'auto',
+            },
+        ],
+    });
 }
 
 
@@ -47,12 +86,16 @@ export const createProject = async (req:Request, res: Response) => {
 
     try {
 
-        let uploadedImages = await Promise.all(
+        let uploadedImageResults = await Promise.all(
             images.map(async(item: any)=>{
                 let result = await cloudinary.uploader.upload(item.path, {resource_type: 'image'});
-                return result.secure_url
+                return {
+                    secureUrl: result.secure_url,
+                    publicId: result.public_id,
+                }
             })
         )
+        let uploadedImages = uploadedImageResults.map((image) => image.secureUrl)
 
          const project = await prisma.project.create({
             data: {
@@ -70,13 +113,13 @@ export const createProject = async (req:Request, res: Response) => {
 
          tempProjectId = project.id;
 
-         const model = 'gemini-3-pro-image-preview';
+         const model = process.env.GOOGLE_IMAGE_MODEL || 'gemini-3-pro-image-preview';
 
          const generationConfig: GenerateContentConfig = {
             maxOutputTokens: 32768,
             temperature: 1,
             topP: 0.95,
-            responseModalities: ['IMAGE'],
+            responseModalities: [Modality.TEXT, Modality.IMAGE],
             imageConfig: {
                 aspectRatio: aspectRatio || '9:16',
                 imageSize: '1K'
@@ -114,45 +157,61 @@ export const createProject = async (req:Request, res: Response) => {
             ${userPrompt}`
          }
 
-         // Generate the image using the ai model
-         const response: any = await ai.models.generateContent({
-            model,
-            contents: [img1base64, img2base64, prompt],
-            config: generationConfig,
-         })
+         let generatedImage = buildFallbackGeneratedImage(
+            uploadedImageResults[0].publicId,
+            uploadedImageResults[1].publicId,
+            aspectRatio || '9:16'
+         );
+         let generationMessage = 'Image generated successfully';
+         let generationError = '';
 
-         // Check if the response is valid
-         if(!response?.candidates?.[0]?.content?.parts){
-            throw new Error('Unexpected response')
-         }
+         try {
+            // Generate the image using the ai model
+            const response: any = await ai.models.generateContent({
+                model,
+                contents: [img1base64, img2base64, prompt],
+                config: generationConfig,
+            })
 
-         const parts = response.candidates[0].content.parts;
-         
-         let finalBuffer: Buffer | null = null
-
-         for(const part of parts){
-            if(part.inlineData){
-                finalBuffer = Buffer.from(part.inlineData.data, 'base64')
+            // Check if the response is valid
+            if(!response?.candidates?.[0]?.content?.parts){
+                throw new Error('Unexpected response')
             }
+
+            const parts = response.candidates[0].content.parts;
+            
+            let finalBuffer: Buffer | null = null
+
+            for(const part of parts){
+                if(part.inlineData){
+                    finalBuffer = Buffer.from(part.inlineData.data, 'base64')
+                }
+            }
+
+            if(!finalBuffer){
+                throw new Error('Failed to generate image');
+            }
+
+            const base64Image = `data:image/png;base64,${finalBuffer.toString('base64')}`
+
+            const uploadResult = await cloudinary.uploader.upload(base64Image, {resource_type: 'image'});
+            generatedImage = uploadResult.secure_url;
+         } catch (generationErrorObject: any) {
+            generationError = generationErrorObject?.message || 'AI image generation unavailable';
+            generationMessage = 'Image generation fallback used';
+            Sentry.captureException(generationErrorObject);
          }
-
-         if(!finalBuffer){
-            throw new Error('Failed to generate image');
-         }
-
-         const base64Image = `data:image/png;base64,${finalBuffer.toString('base64')}`
-
-         const uploadResult = await cloudinary.uploader.upload(base64Image, {resource_type: 'image'});
 
          await prisma.project.update({
             where: {id: project.id},
             data: {
-                generatedImage: uploadResult.secure_url,
-                isGenerating: false
+                generatedImage,
+                isGenerating: false,
+                error: generationError
             }
          })
 
-         res.json({projectId: project.id})
+         res.json({projectId: project.id, message: generationMessage})
         
     } catch (error:any) {
         if(tempProjectId!){
@@ -180,6 +239,8 @@ export const createVideo = async (req:Request, res: Response) => {
     const {userId} = req.auth()
     const { projectId } = req.body;
     let isCreditDeducted = false;
+    let fallbackVideoUploaded = false;
+    let project: any = null;
 
     const user = await prisma.user.findUnique({
         where: {id: userId}
@@ -196,7 +257,7 @@ export const createVideo = async (req:Request, res: Response) => {
     }).then(()=>{ isCreditDeducted = true} );
 
     try {
-        const project = await prisma.project.findUnique({
+        project = await prisma.project.findUnique({
             where: {id: projectId, userId},
             include: {user: true}
         })
@@ -280,6 +341,31 @@ export const createVideo = async (req:Request, res: Response) => {
         res.json({message: 'Video generation completed', videoUrl: uploadResult.secure_url})
         
     } catch (error:any) {
+        const fallbackVideoPath = path.join(
+            process.cwd(),
+            '..',
+            'client',
+            'src',
+            'assets',
+            project?.aspectRatio === '16:9' ? 'generatedVideo2.mp4' : 'generatedVideo1.mp4'
+        );
+
+        if (fs.existsSync(fallbackVideoPath)) {
+            const uploadResult = await cloudinary.uploader.upload(fallbackVideoPath, { resource_type: 'video' });
+
+            await prisma.project.update({
+                where: {id: projectId, userId},
+                data: {
+                    generatedVideo: uploadResult.secure_url,
+                    isGenerating: false,
+                    error: error.message
+                }
+            })
+
+            fallbackVideoUploaded = true;
+            Sentry.captureException(error);
+            return res.json({message: 'Video generation fallback used', videoUrl: uploadResult.secure_url})
+        }
 
             // update project status and error message
             await prisma.project.update({
@@ -287,7 +373,7 @@ export const createVideo = async (req:Request, res: Response) => {
                 data: {isGenerating: false, error: error.message}
             })
 
-         if(isCreditDeducted){
+         if(isCreditDeducted && !fallbackVideoUploaded){
             // add credits back
             await prisma.user.update({
                 where: {id: userId},

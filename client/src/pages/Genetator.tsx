@@ -7,6 +7,7 @@ import { useAuth, useUser } from "@clerk/clerk-react"
 import { useNavigate } from "react-router-dom"
 import toast from "react-hot-toast"
 import api from "../configs/axios"
+import { authHeaders } from "../utils/authHeaders"
 
 
 const Genetator = () => {
@@ -52,7 +53,7 @@ const Genetator = () => {
         const token = await getToken()
 
         const { data } = await api.post('/api/project/create', formData, {
-           headers: { Authorization: `Bearer ${token}` }
+           headers: authHeaders(token, user?.id)
         })
 
         toast.success(data.message)

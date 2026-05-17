@@ -7,6 +7,7 @@ import { useAuth, useUser } from "@clerk/clerk-react"
 import { useNavigate } from "react-router-dom"
 import api from "../configs/axios"
 import toast from "react-hot-toast"
+import { authHeaders } from "../utils/authHeaders"
 
 
 const MyGenerations = () => {
@@ -22,7 +23,7 @@ const MyGenerations = () => {
       try {
         const token = await getToken();
         const { data } = await api.get('/api/user/projects', {
-          headers: { Authorization: `Bearer ${token}` } 
+          headers: authHeaders(token, user?.id)
         })
         setGenerations(data.projects)
         setLoading(false)

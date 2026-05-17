@@ -7,6 +7,7 @@ import { assets } from '../assets/assets';
 import { useClerk, useUser, UserButton, useAuth } from '@clerk/clerk-react';
 import api from '../configs/axios';
 import toast from 'react-hot-toast';
+import { authHeaders } from '../utils/authHeaders';
 
 export default function Navbar() {
 
@@ -30,7 +31,7 @@ export default function Navbar() {
     const getUserCredits = async ()=>{
         try {
             const token = await getToken()
-            const {data} = await api.get('/api/user/credits', {headers: {Authorization: `Bearer ${token}`}})
+            const {data} = await api.get('/api/user/credits', {headers: authHeaders(token, user?.id)})
             setCredits(data.credits)
         } catch (error: any) {
             toast.error(error?.response?.data?.message || error.message)

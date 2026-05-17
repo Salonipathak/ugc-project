@@ -4,12 +4,14 @@ import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { EllipsisIcon, ImageIcon, Loader2Icon, PlaySquareIcon, Share2Icon, Trash2Icon } from "lucide-react";
 import { GhostButton, PrimaryButton } from "./Buttons";
-import { useAuth } from "@clerk/clerk-react";
+import { useAuth, useUser } from "@clerk/clerk-react";
 import api from "../configs/axios";
 import toast from "react-hot-toast";
+import { authHeaders } from "../utils/authHeaders";
 
 const ProjectCard = ({ gen, setGenerations, forCommunity = false }: { gen: Project; setGenerations: React.Dispatch<React.SetStateAction<Project[]>>; forCommunity?: boolean }) => {
     const { getToken } = useAuth();
+    const { user } = useUser();
 
     const navigate = useNavigate();
     const [menuOpen, setMenuOpen] = useState(false);
@@ -21,7 +23,7 @@ const ProjectCard = ({ gen, setGenerations, forCommunity = false }: { gen: Proje
         try {
             const token = await getToken();
             const { data } = await api.delete(`/api/project/${id}`, {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: authHeaders(token, user?.id),
             });
             setGenerations((generations) => generations.filter((gen) => gen.id !== id));
             toast.success(data.message);
@@ -35,7 +37,7 @@ const ProjectCard = ({ gen, setGenerations, forCommunity = false }: { gen: Proje
         try {
             const token = await getToken();
             const { data } = await api.get(`/api/user/publish/${projectId}`, {
-                headers: { Authorization: `Bearer ${token}` },
+                headers: authHeaders(token, user?.id),
             });
 
             setGenerations((generations) => generations.map((gen) => (gen.id === projectId ? { ...gen, isPublished: data.isPublished } : gen)));
