@@ -26,10 +26,11 @@ const MyGenerations = () => {
           headers: authHeaders(token, user?.id)
         })
         setGenerations(data.projects)
-        setLoading(false)
       } catch (error: any) {
         toast.error(error?.response?.data?.message || error.message);
         console.log(error);
+      } finally {
+        setLoading(false);
       }
     }
   

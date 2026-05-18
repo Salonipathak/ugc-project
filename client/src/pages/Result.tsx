@@ -26,10 +26,11 @@ const Result = () => {
             });
             setProjectData(data.project);
             setIsGenerating(data.project.isGenerating);
-            setLoading(false);
         } catch (error: any) {
             toast.error(error?.response?.data?.message || error.message);
             console.log(error);
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -42,26 +43,35 @@ const Result = () => {
                 { projectId },
                 {
                     headers: authHeaders(token, user?.id),
+                    timeout: 600000,
                 }
             );
 
-            setProjectData((prev) => ({ ...prev, generatedVideo: data.videoUrl, isGenerating: false }));
+            setProjectData((prev) => ({
+                ...prev,
+                generatedVideo: data.videoUrl,
+                isGenerating: false,
+            }));
 
             toast.success(data.message);
-            setIsGenerating(false);
         } catch (error: any) {
             toast.error(error?.response?.data?.message || error.message);
-            console.log(error);
+            try {
+                await fetchProjectData();
+            } catch {
+                setIsGenerating(false);
+            }
         }
     };
 
     useEffect(() => {
-        if (user && !project.id) {
+        if (user && projectId) {
+            setLoading(true);
             fetchProjectData();
         } else if (isLoaded && !user) {
             navigate("/");
         }
-    }, [user]);
+    }, [user, projectId, isLoaded]);
 
     // Fetch project every 10 seconds
     useEffect(() => {
@@ -84,7 +94,7 @@ const Result = () => {
                     <h1 className="text-2xl md:text-3xl font-medium">Generation Result</h1>
                     <Link to="/generate" className="btn-secondary text-sm flex items-center gap-2">
                         <RefreshCwIcon className="w-4 h-4" />
-                        <p className="max-sm:hidden'">New Generation</p>
+                        <p className="max-sm:hidden">New Generation</p>
                     </Link>
                 </header>
 
