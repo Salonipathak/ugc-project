@@ -9,11 +9,11 @@ const getUserPayload = (data: any) => ({
     image: data?.image_url || '',
 });
 
-const clerkWebhooks = async (req: Request, res: Response) =>{
-    try {
-        const evt: any = await verifyWebhook(req)
-        // Getting Data from request 
-        const { data, type } = evt;
+const clerkWebhooks = async (req: Request, res: Response) => {
+  try {
+    const evt: any = await verifyWebhook(req);
+    // Getting Data from request
+    const { data, type } = evt;
 
         // Switch Cases for differernt Events
         switch (type) {
@@ -46,15 +46,22 @@ const clerkWebhooks = async (req: Request, res: Response) =>{
                 break;
             }
 
-            case "paymentAttempt.updated": {
-                if((data.charge_type === "recurring" || data.charge_type === "checkout") && data.status === "paid") {
-                    const credits = {pro: 80, premium: 240,}
-                     const clerkUserId = data?.payer?.user_id;
-                     const planId: keyof typeof credits = data?.subscription_items?.[0]?.plan?.slug;
+      case "paymentAttempt.updated": {
+        if (
+          (data.charge_type === "recurring" ||
+            data.charge_type === "checkout") &&
+          data.status === "paid"
+        ) {
+          const credits = { pro: 80, premium: 240 };
+          const clerkUserId = data?.payer?.user_id;
+          const planId: keyof typeof credits =
+            data?.subscription_items?.[0]?.plan?.slug;
 
-                     if(planId !== "pro" && planId !== "premium"){
-                        return res.status(400).json({message: "Invalid plan"})
-                     }
+          if (planId !== "pro" && planId !== "premium") {
+            return res.status(400).json({ message: "Invalid plan" });
+          }
+
+          console.log(planId);
 
                      if (!clerkUserId) {
                         return res.status(400).json({message: "Missing Clerk user id"})

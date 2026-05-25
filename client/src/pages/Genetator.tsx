@@ -68,8 +68,9 @@ const Genetator = () => {
         navigate('/result/' + data.projectId)
 
       } catch (error: any) {
-        setIsGenerating(false);
         toast.error(error?.response?.data?.message || error.message)
+      } finally {
+        setIsGenerating(false);
       }
   }
 
@@ -116,7 +117,7 @@ const Genetator = () => {
             <div className="mb-4 text-gray-300">
               <label htmlFor="userPrompt" className="block text-sm mb-4">User Prompt <span className="text-xs text-violet-400">(optional)</span></label>
 
-              <textarea id="userPrompt" rows={4} value={userPrompt} onChange={(e)=>setUserPrompt(e.target.value)} placeholder="Describe how you want the narration to be."
+              <textarea id="userPrompt" rows={4} value={userPrompt} onChange={(e)=>setUserPrompt(e.target.value)} placeholder="e.g. outdoor golden-hour vibe, model laughing while holding product near face..."
                 className="w-full bg-white/3 rounded-lg border-2 p-4 text-sm border-violet-200/10 focus:border-violet-500/50 outline-none resize-none transition-all"/>
             </div>
 
