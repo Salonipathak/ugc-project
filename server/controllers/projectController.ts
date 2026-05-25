@@ -2,71 +2,242 @@ import {Request, Response } from 'express'
 import * as Sentry from "@sentry/node";
 import { prisma } from '../configs/prisma.js';
 import {v2 as cloudinary } from 'cloudinary'
-import {GenerateContentConfig, HarmBlockThreshold, HarmCategory, Modality} from '@google/genai'
 import fs from 'fs';
 import path from 'path';
 import ai from '../configs/ai.js';
 import axios from 'axios';
+import crypto from 'crypto';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 
-const loadImage = (path: string, mimeType: string)=>{
-    return {
-        inlineData: {
-            data: fs.readFileSync(path).toString('base64'),
-            mimeType
-        }
-    }
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
+
+const TENSOR_ART_API_BASE = process.env.TENSOR_ART_API_BASE || 'https://ap-east-1.tensorart.cloud';
+const TENSOR_ART_POLL_INTERVAL_MS = Number(process.env.TENSOR_ART_POLL_INTERVAL_MS || 5000);
+const TENSOR_ART_POLL_TIMEOUT_MS = Number(process.env.TENSOR_ART_POLL_TIMEOUT_MS || 180000);
+const DEFAULT_TENSOR_ART_WORKFLOW_CONFIG = {
+    templateId: '1002579564481744204',
+    productImageNodeId: '60',
+    modelImageNodeId: '63',
+    promptNodeId: '6',
+};
+
+type TensorArtFieldAttr = {
+    nodeId: string;
+    fieldName: string;
+    fieldValue: string | number;
 }
 
-const getOverlayPublicId = (publicId: string) => publicId.replace(/\//g, ':');
+type TensorArtWorkflowConfig = {
+    templateId?: string;
+    productImageNodeId?: string;
+    modelImageNodeId?: string;
+    promptNodeId?: string;
+    negativePromptNodeId?: string;
+    widthNodeId?: string;
+    heightNodeId?: string;
+    aspectRatioNodeId?: string;
+}
 
-const buildFallbackGeneratedImage = (
-    productPublicId: string,
-    modelPublicId: string,
-    aspectRatio = '9:16'
-) => {
-    const isWide = aspectRatio === '16:9';
+const createTensorArtClient = () => {
+    if (!process.env.TENSOR_ART_API_KEY) {
+        throw new Error('TENSOR_ART_API_KEY is not configured');
+    }
 
-    return cloudinary.url(modelPublicId, {
-        secure: true,
-        resource_type: 'image',
-        transformation: [
-            {
-                width: isWide ? 1280 : 900,
-                height: isWide ? 720 : 1600,
-                crop: 'fill',
-                gravity: 'auto',
-            },
-            {
-                overlay: getOverlayPublicId(productPublicId),
-                width: isWide ? 300 : 250,
-                crop: 'fit',
-                effect: 'shadow:45',
-            },
-            {
-                flags: 'layer_apply',
-                gravity: 'center',
-                x: isWide ? -120 : -40,
-                y: isWide ? 80 : 160,
-            },
-            {
-                quality: 'auto',
-                fetch_format: 'auto',
-            },
-        ],
+    return axios.create({
+        baseURL: TENSOR_ART_API_BASE,
+        headers: {
+            Authorization: `Bearer ${process.env.TENSOR_ART_API_KEY}`,
+            'Content-Type': 'application/json',
+        },
     });
 }
 
+const isFallbackGeneratedImage = (generatedImage?: string | null) => {
+    if (!generatedImage) return false;
+    return generatedImage.includes('/upload/') && generatedImage.includes('/l_') && generatedImage.includes('/fl_layer_apply');
+}
+
+const removeFallbackGeneratedImage = <T extends { generatedImage: string | null }>(project: T) => ({
+    ...project,
+    generatedImage: isFallbackGeneratedImage(project.generatedImage) ? '' : project.generatedImage,
+});
+
+const buildPrompt = (productName: string, productDescription?: string, userPrompt?: string) => {
+    return `Combine reference image 1, the product, with reference image 2, the person, into one realistic ecommerce lifestyle photo.
+Make the person naturally hold or use the product.
+Preserve the product identity, shape, colors, and visible details.
+Preserve the person's likeness while matching lighting, shadows, scale, and perspective.
+Use professional studio lighting and produce photorealistic, commercial-quality imagery.
+Product name: ${productName}.
+${productDescription ? `Product description: ${productDescription}.` : ''}
+${userPrompt ? `Additional direction: ${userPrompt}` : ''}`
+}
+
+const getTensorArtDimensions = (aspectRatio?: string) => {
+    if (aspectRatio === '16:9') {
+        return { width: 1344, height: 768 };
+    }
+
+    return { width: 768, height: 1344 };
+}
+
+const uploadTensorArtResource = async (filePath: string) => {
+    const tensorArt = createTensorArtClient();
+    const { data } = await tensorArt.post('/v1/resource/image', { expireSec: 3600 });
+
+    if (!data?.resourceId || !data?.putUrl) {
+        throw new Error('TensorArt did not return a resource upload URL');
+    }
+
+    await axios.put(data.putUrl, fs.createReadStream(filePath), {
+        headers: data.headers || { 'Content-Type': 'application/octet-stream' },
+        maxBodyLength: Infinity,
+        maxContentLength: Infinity,
+    });
+
+    return data.resourceId as string;
+}
+
+const addEnvField = (
+    fieldAttrs: TensorArtFieldAttr[],
+    nodeId: string | undefined,
+    defaultFieldName: string,
+    fieldValue: string | number,
+    fieldName?: string
+) => {
+    if (!nodeId) return;
+
+    fieldAttrs.push({
+        nodeId,
+        fieldName: fieldName || defaultFieldName,
+        fieldValue,
+    });
+}
+
+const buildTensorArtFields = (
+    productResourceId: string,
+    modelResourceId: string,
+    prompt: string,
+    aspectRatio: string | undefined,
+    workflowConfig: TensorArtWorkflowConfig
+) => {
+    const fieldAttrs: TensorArtFieldAttr[] = [];
+    const { width, height } = getTensorArtDimensions(aspectRatio);
+
+    addEnvField(fieldAttrs, workflowConfig.productImageNodeId, process.env.TENSOR_ART_PRODUCT_IMAGE_FIELD_NAME || 'image', productResourceId);
+    addEnvField(fieldAttrs, workflowConfig.modelImageNodeId, process.env.TENSOR_ART_MODEL_IMAGE_FIELD_NAME || 'image', modelResourceId);
+    addEnvField(fieldAttrs, workflowConfig.promptNodeId, process.env.TENSOR_ART_PROMPT_FIELD_NAME || 'text', prompt);
+    addEnvField(
+        fieldAttrs,
+        workflowConfig.negativePromptNodeId,
+        process.env.TENSOR_ART_NEGATIVE_PROMPT_FIELD_NAME || 'text',
+        'blurry, low quality, distorted hands, extra fingers, missing fingers, bad anatomy, duplicate person, watermark, logo, text artifacts'
+    );
+    addEnvField(fieldAttrs, workflowConfig.widthNodeId, process.env.TENSOR_ART_WIDTH_FIELD_NAME || 'width', width);
+    addEnvField(fieldAttrs, workflowConfig.heightNodeId, process.env.TENSOR_ART_HEIGHT_FIELD_NAME || 'height', height);
+    addEnvField(fieldAttrs, workflowConfig.aspectRatioNodeId, process.env.TENSOR_ART_ASPECT_RATIO_FIELD_NAME || 'text', aspectRatio || '9:16');
+
+    if (fieldAttrs.length < 3) {
+        throw new Error('TensorArt workflow fields are missing. Product image, model image, and prompt node IDs are required.');
+    }
+
+    return { fieldAttrs };
+}
+
+const getTensorArtOutputUrl = (job: any) => {
+    const successImage = job?.successInfo?.images?.[0]?.url;
+    if (successImage) return successImage;
+
+    const nodes = job?.runningInfo?.workflowFinishItem?.nodes || job?.successInfo?.workflowFinishItem?.nodes || {};
+    for (const node of Object.values(nodes) as any[]) {
+        const outputImage = node?.outputUi?.images?.[0]?.filename;
+        if (outputImage) return outputImage;
+    }
+
+    return '';
+}
+
+const waitForTensorArtJob = async (jobId: string) => {
+    const tensorArt = createTensorArtClient();
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < TENSOR_ART_POLL_TIMEOUT_MS) {
+        const { data } = await tensorArt.get(`/v1/jobs/${jobId}`);
+        const job = data?.job;
+
+        if (job?.status === 'SUCCESS') {
+            const outputUrl = getTensorArtOutputUrl(job);
+            if (!outputUrl) {
+                throw new Error('TensorArt completed without returning an image URL');
+            }
+            return outputUrl;
+        }
+
+        if (job?.status === 'FAILED' || job?.status === 'CANCELED') {
+            throw new Error(job?.failedInfo?.reason || `TensorArt image generation ${job.status.toLowerCase()}`);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, TENSOR_ART_POLL_INTERVAL_MS));
+    }
+
+    throw new Error('TensorArt image generation timed out');
+}
+
+const generateImageWithTensorArt = async (
+    images: any[],
+    prompt: string,
+    aspectRatio: string | undefined,
+    workflowConfig: TensorArtWorkflowConfig
+) => {
+    const templateId = workflowConfig.templateId || DEFAULT_TENSOR_ART_WORKFLOW_CONFIG.templateId;
+
+    const tensorArt = createTensorArtClient();
+    const [productResourceId, modelResourceId] = await Promise.all([
+        uploadTensorArtResource(images[0].path),
+        uploadTensorArtResource(images[1].path),
+    ]);
+
+    const { data } = await tensorArt.post('/v1/jobs/workflow/template', {
+        requestId: crypto.createHash('md5').update(`${Date.now()}-${crypto.randomUUID()}`).digest('hex'),
+        templateId,
+        fields: buildTensorArtFields(productResourceId, modelResourceId, prompt, aspectRatio, workflowConfig),
+    });
+
+    const jobId = data?.job?.id;
+    if (!jobId) {
+        throw new Error('TensorArt did not create an image generation job');
+    }
+
+    return waitForTensorArtJob(jobId);
+}
+
+const getTensorArtWorkflowConfig = (body: any): TensorArtWorkflowConfig => ({
+    templateId: body.tensorArtTemplateId || process.env.TENSOR_ART_TEMPLATE_ID || DEFAULT_TENSOR_ART_WORKFLOW_CONFIG.templateId,
+    productImageNodeId: body.tensorArtProductImageNodeId || process.env.TENSOR_ART_PRODUCT_IMAGE_NODE_ID || DEFAULT_TENSOR_ART_WORKFLOW_CONFIG.productImageNodeId,
+    modelImageNodeId: body.tensorArtModelImageNodeId || process.env.TENSOR_ART_MODEL_IMAGE_NODE_ID || DEFAULT_TENSOR_ART_WORKFLOW_CONFIG.modelImageNodeId,
+    promptNodeId: body.tensorArtPromptNodeId || process.env.TENSOR_ART_PROMPT_NODE_ID || DEFAULT_TENSOR_ART_WORKFLOW_CONFIG.promptNodeId,
+    negativePromptNodeId: body.tensorArtNegativePromptNodeId || process.env.TENSOR_ART_NEGATIVE_PROMPT_NODE_ID,
+    widthNodeId: body.tensorArtWidthNodeId || process.env.TENSOR_ART_WIDTH_NODE_ID,
+    heightNodeId: body.tensorArtHeightNodeId || process.env.TENSOR_ART_HEIGHT_NODE_ID,
+    aspectRatioNodeId: body.tensorArtAspectRatioNodeId || process.env.TENSOR_ART_ASPECT_RATIO_NODE_ID,
+});
+
 
 export const createProject = async (req:Request, res: Response) => {
-    let tempProjectId: string;
+    let tempProjectId: string | undefined;
     const { userId } = req.auth();
     let isCreditDeducted = false;
 
     const {name = 'New Project', aspectRatio, userPrompt, productName, productDescription, targetLength = 5} = req.body;
+    const tensorArtWorkflowConfig = getTensorArtWorkflowConfig(req.body);
 
     const images: any = req.files;
 
-    if(images.length < 2 || !productName){
+    if(!Array.isArray(images) || images.length < 2 || !productName){
         return res.status(400).json({message: 'Please upload at least 2 images'})
     }
 
@@ -89,13 +260,9 @@ export const createProject = async (req:Request, res: Response) => {
         let uploadedImageResults = await Promise.all(
             images.map(async(item: any)=>{
                 let result = await cloudinary.uploader.upload(item.path, {resource_type: 'image'});
-                return {
-                    secureUrl: result.secure_url,
-                    publicId: result.public_id,
-                }
+                return result.secure_url;
             })
         )
-        let uploadedImages = uploadedImageResults.map((image) => image.secureUrl)
 
          const project = await prisma.project.create({
             data: {
@@ -106,100 +273,26 @@ export const createProject = async (req:Request, res: Response) => {
                 userPrompt,
                 aspectRatio,
                 targetLength: parseInt(targetLength),
-                uploadedImages,
+                uploadedImages: uploadedImageResults,
                 isGenerating: true
             }
          })
 
          tempProjectId = project.id;
 
-         const model = process.env.GOOGLE_IMAGE_MODEL || 'gemini-3-pro-image-preview';
+         const prompt = buildPrompt(productName, productDescription, userPrompt);
 
-         const generationConfig: GenerateContentConfig = {
-            maxOutputTokens: 32768,
-            temperature: 1,
-            topP: 0.95,
-            responseModalities: [Modality.TEXT, Modality.IMAGE],
-            imageConfig: {
-                aspectRatio: aspectRatio || '9:16',
-                imageSize: '1K'
-            },
-            safetySettings: [
-                {
-                    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                    threshold: HarmBlockThreshold.OFF,
-                },
-                {
-                    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                    threshold: HarmBlockThreshold.OFF,
-                },
-                {
-                    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                    threshold: HarmBlockThreshold.OFF,
-                },
-                {
-                    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-                    threshold: HarmBlockThreshold.OFF,
-                },
-            ]
-         }
-
-         // image to base64 structure for ai model
-         const img1base64 = loadImage(images[0].path, images[0].mimetype);
-         const img2base64 = loadImage(images[1].path, images[1].mimetype);
-
-         const prompt = {
-            text: `Combine the person and product into a realistic photo.
-            Make the person naturally hold or use the product.
-            Match lighting, shadows, scale and perspective.
-            Make the person stand in professional studio lighting.
-            Output ecommerce-quality photo realistic imagery.
-            ${userPrompt}`
-         }
-
-         let generatedImage = buildFallbackGeneratedImage(
-            uploadedImageResults[0].publicId,
-            uploadedImageResults[1].publicId,
-            aspectRatio || '9:16'
-         );
-         let generationMessage = 'Image generated successfully';
-         let generationError = '';
+         let generatedImage = '';
 
          try {
-            // Generate the image using the ai model
-            const response: any = await ai.models.generateContent({
-                model,
-                contents: [img1base64, img2base64, prompt],
-                config: generationConfig,
-            })
-
-            // Check if the response is valid
-            if(!response?.candidates?.[0]?.content?.parts){
-                throw new Error('Unexpected response')
-            }
-
-            const parts = response.candidates[0].content.parts;
-            
-            let finalBuffer: Buffer | null = null
-
-            for(const part of parts){
-                if(part.inlineData){
-                    finalBuffer = Buffer.from(part.inlineData.data, 'base64')
-                }
-            }
-
-            if(!finalBuffer){
-                throw new Error('Failed to generate image');
-            }
-
-            const base64Image = `data:image/png;base64,${finalBuffer.toString('base64')}`
-
-            const uploadResult = await cloudinary.uploader.upload(base64Image, {resource_type: 'image'});
+            const outputUrl = await generateImageWithTensorArt(images, prompt, aspectRatio, tensorArtWorkflowConfig);
+            const uploadResult = await cloudinary.uploader.upload(outputUrl, {resource_type: 'image'});
             generatedImage = uploadResult.secure_url;
          } catch (generationErrorObject: any) {
-            generationError = generationErrorObject?.message || 'AI image generation unavailable';
-            generationMessage = 'Image generation fallback used';
+            console.error("FULL IMAGE ERROR:", generationErrorObject);
+
             Sentry.captureException(generationErrorObject);
+            throw generationErrorObject;
          }
 
          await prisma.project.update({
@@ -207,14 +300,14 @@ export const createProject = async (req:Request, res: Response) => {
             data: {
                 generatedImage,
                 isGenerating: false,
-                error: generationError
+                error: ''
             }
          })
 
-         res.json({projectId: project.id, message: generationMessage})
+         res.json({projectId: project.id, message: 'Image generated successfully'})
         
     } catch (error:any) {
-        if(tempProjectId!){
+        if(tempProjectId){
             // update project status and error message
             await prisma.project.update({
                 where: {id: tempProjectId},
@@ -391,7 +484,7 @@ export const getAllPublishedProjects = async (req:Request, res: Response) => {
         const projects = await prisma.project.findMany({
             where: {isPublished: true}
         })
-        res.json({projects})
+        res.json({projects: projects.map(removeFallbackGeneratedImage)})
 
     } catch (error:any) {
         Sentry.captureException(error);

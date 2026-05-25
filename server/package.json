@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@clerk/express": "^1.7.61",
-    "@google/genai": "^1.35.0",
+    "@google/genai": "^1.52.0",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@sentry/node": "^10.32.1",
@@ -29,7 +29,8 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "multer": "^2.0.2",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "replicate": "^1.4.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

@@ -61,8 +61,9 @@ const ProjectCard = ({ gen, setGenerations, forCommunity = false }: { gen: Proje
                     )}
 
                     {!gen?.generatedImage && !gen?.generatedVideo && (
-                        <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-black/20">
-                            <Loader2Icon className="size-7 animate-spin" />
+                        <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center gap-3 bg-black/20 p-5 text-center">
+                            {gen.isGenerating ? <Loader2Icon className="size-7 animate-spin" /> : <ImageIcon className="size-7 text-gray-400" />}
+                            {!gen.isGenerating && <p className="text-xs text-gray-300">{gen.error || "Image generation failed"}</p>}
                         </div>
                     )}
 

@@ -3,6 +3,12 @@ import { verifyWebhook } from '@clerk/express/webhooks'
 import { prisma } from '../configs/prisma.js';
 import * as Sentry from "@sentry/node"
 
+const getUserPayload = (data: any) => ({
+    email: data?.email_addresses?.[0]?.email_address || '',
+    name: [data?.first_name, data?.last_name].filter(Boolean).join(' ') || data?.username || '',
+    image: data?.image_url || '',
+});
+
 const clerkWebhooks = async (req: Request, res: Response) =>{
     try {
         const evt: any = await verifyWebhook(req)
@@ -12,33 +18,31 @@ const clerkWebhooks = async (req: Request, res: Response) =>{
         // Switch Cases for differernt Events
         switch (type) {
             case "user.created": {
-                await prisma.user.create({
-                    data: {
+                await prisma.user.upsert({
+                    where: { id: data.id },
+                    update: getUserPayload(data),
+                    create: {
                         id: data.id,
-                        email: data?.email_addresses[0]?.email_address,
-                        name: data?.first_name + " " + data?.last_name,
-                        image: data?.image_url,
-                    }
+                        ...getUserPayload(data),
+                    },
                 })
                 break;
             }
 
             case "user.updated": {
-                await prisma.user.update({
-                    where:{
-                        id: data.id
+                await prisma.user.upsert({
+                    where: { id: data.id },
+                    update: getUserPayload(data),
+                    create: {
+                        id: data.id,
+                        ...getUserPayload(data),
                     },
-                    data: {
-                        email: data?.email_addresses[0]?.email_address,
-                        name: data?.first_name + " " + data?.last_name,
-                        image: data?.image_url,
-                    }
                 })
                 break;
             }
 
             case "user.deleted": {
-                await prisma.user.delete({ where:{ id: data.id } })
+                await prisma.user.deleteMany({ where:{ id: data.id } })
                 break;
             }
 
@@ -52,13 +56,13 @@ const clerkWebhooks = async (req: Request, res: Response) =>{
                         return res.status(400).json({message: "Invalid plan"})
                      }
 
-                     console.log(planId)
+                     if (!clerkUserId) {
+                        return res.status(400).json({message: "Missing Clerk user id"})
+                     }
 
-                     await prisma.user.update({
+                     await prisma.user.updateMany({
                         where: {id: clerkUserId},
-                        data: {
-                            credits: {increment: credits[planId]}
-                        }
+                        data: { credits: {increment: credits[planId]} }
                      })
                 }
                 break;
@@ -72,7 +76,8 @@ const clerkWebhooks = async (req: Request, res: Response) =>{
 
     } catch (error: any) {
         Sentry.captureException(error)
-        res.status(500).json({ message: error.message });
+        const status = error?.status || error?.statusCode || 500;
+        res.status(status).json({ message: error.message });
     }
 }
 

@@ -2,6 +2,16 @@ import {Request, Response} from 'express'
 import * as Sentry from "@sentry/node";
 import { prisma } from '../configs/prisma.js';
 
+const isFallbackGeneratedImage = (generatedImage?: string | null) => {
+    if (!generatedImage) return false;
+    return generatedImage.includes('/upload/') && generatedImage.includes('/l_') && generatedImage.includes('/fl_layer_apply');
+}
+
+const removeFallbackGeneratedImage = <T extends { generatedImage: string | null }>(project: T) => ({
+    ...project,
+    generatedImage: isFallbackGeneratedImage(project.generatedImage) ? '' : project.generatedImage,
+});
+
 // Get User Credits
 export const getUserCredits = async (req: Request, res: Response) => {
     try {
@@ -29,7 +39,7 @@ export const getAllProjects = async (req: Request, res: Response) => {
             where: {userId},
             orderBy: {createdAt: 'desc'}
         })
-        res.json({projects})
+        res.json({projects: projects.map(removeFallbackGeneratedImage)})
 
     } catch (error: any) {
         Sentry.captureException(error);
@@ -50,7 +60,7 @@ export const getProjectById = async (req: Request, res: Response) => {
 
         if(!project) { return res.status(404).json({message: 'Project not found' })}
 
-        res.json({project})
+        res.json({project: removeFallbackGeneratedImage(project)})
         
     } catch (error: any) {
         Sentry.captureException(error);

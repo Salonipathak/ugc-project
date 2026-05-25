@@ -11,6 +11,10 @@ import { authHeaders } from "../utils/authHeaders"
 
 
 const Genetator = () => {
+  const tensorArtTemplateId = import.meta.env.VITE_TENSOR_ART_TEMPLATE_ID
+  const tensorArtProductImageNodeId = import.meta.env.VITE_TENSOR_ART_PRODUCT_IMAGE_NODE_ID
+  const tensorArtModelImageNodeId = import.meta.env.VITE_TENSOR_ART_MODEL_IMAGE_NODE_ID
+  const tensorArtPromptNodeId = import.meta.env.VITE_TENSOR_ART_PROMPT_NODE_ID
 
   const {user} = useUser()
   const {getToken} = useAuth()
@@ -47,6 +51,10 @@ const Genetator = () => {
         formData.append('productDescription', productDescription)
         formData.append('userPrompt', userPrompt)
         formData.append('aspectRatio', aspectRatio)
+        formData.append('tensorArtTemplateId', tensorArtTemplateId)
+        formData.append('tensorArtProductImageNodeId', tensorArtProductImageNodeId)
+        formData.append('tensorArtModelImageNodeId', tensorArtModelImageNodeId)
+        formData.append('tensorArtPromptNodeId', tensorArtPromptNodeId)
         formData.append('images', productImage)
         formData.append('images', modelImage)
 

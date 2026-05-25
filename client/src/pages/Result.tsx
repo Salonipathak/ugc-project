@@ -94,7 +94,16 @@ const Result = () => {
                     <div className="lg:col-span-2 space-y-6">
                         <div className="glass-panel inline-block p-2 rounded-2xl">
                             <div className={`${project?.aspectRatio === "9:16" ? "aspect-9/16" : "aspect-video"} sm:max-h-200 rounded-xl bg-gray-900 overflow-hidden relative`}>
-                                {project?.generatedVideo ? <video src={project.generatedVideo} controls autoPlay loop className="w-full h-full object-cover" /> : <img src={project.generatedImage} alt="Generated Result" className="w-full h-full object-cover" />}
+                                {project?.generatedVideo ? (
+                                    <video src={project.generatedVideo} controls autoPlay loop className="w-full h-full object-cover" />
+                                ) : project?.generatedImage ? (
+                                    <img src={project.generatedImage} alt="Generated Result" className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="w-full h-full min-h-80 flex flex-col items-center justify-center gap-3 p-6 text-center">
+                                        <ImageIcon className="size-8 text-gray-400" />
+                                        <p className="text-sm text-gray-300">{project.error || "Image generation failed"}</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
