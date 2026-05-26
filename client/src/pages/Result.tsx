@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Project } from "../types";
-import { ImageIcon, Loader2Icon, RefreshCwIcon, SparkleIcon, VideoIcon } from "lucide-react";
+import { ImageIcon, Loader2Icon, RefreshCwIcon } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { GhostButton, PrimaryButton } from "../components/Buttons";
+import { GhostButton } from "../components/Buttons";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import api from "../configs/axios";
 import toast from "react-hot-toast";
 import { authHeaders } from "../utils/authHeaders";
-
-const POLL_MS = 2500;
-const POLL_TIMEOUT_MS = 12 * 60 * 1000;
 
 const Result = () => {
     const { projectId } = useParams();
@@ -19,8 +16,6 @@ const Result = () => {
 
     const [project, setProjectData] = useState<Project>({} as Project);
     const [loading, setLoading] = useState(true);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const pollStartedAt = useRef<number | null>(null);
 
     const fetchProjectData = useCallback(async () => {
         if (!projectId || !user) return null;
@@ -32,226 +27,85 @@ const Result = () => {
 
         const next = data.project as Project;
         setProjectData(next);
-        setIsGenerating(Boolean(next.isGenerating));
         return next;
     }, [getToken, projectId, user]);
 
-    const stopPolling = (message?: string, isError = false) => {
-        pollStartedAt.current = null;
-        setIsGenerating(false);
-        if (message) {
-            if (isError) toast.error(message);
-            else toast.success(message);
+    useEffect(() => {
+        if (!user || !projectId) {
+            if (isLoaded && !user) navigate("/");
+            return;
         }
-    };
 
-    const startPolling = useCallback(() => {
-        if (pollStartedAt.current) return;
-        pollStartedAt.current = Date.now();
+        setLoading(true);
+        fetchProjectData()
+            .catch((error: any) => {
+                toast.error(error?.response?.data?.message || error.message);
+            })
+            .finally(() => setLoading(false));
 
-        const tick = async () => {
-            if (!pollStartedAt.current) return;
-
-            if (Date.now() - pollStartedAt.current > POLL_TIMEOUT_MS) {
-                stopPolling("Video generation timed out. Please try again.", true);
-                return;
+        const interval = setInterval(async () => {
+            const next = await fetchProjectData().catch(() => null);
+            if (next && (next.generatedImage || (!next.isGenerating && next.error))) {
+                clearInterval(interval);
             }
+        }, 3000);
 
-            try {
-                const next = await fetchProjectData();
-                if (!next) return;
-
-                if (next.generatedVideo) {
-                    stopPolling("Video generated successfully!");
-                    return;
-                }
-
-                if (!next.isGenerating && next.error) {
-                    stopPolling(next.error, true);
-                    return;
-                }
-
-                if (!next.isGenerating && !next.generatedVideo) {
-                    stopPolling("Video generation ended without a result.", true);
-                }
-            } catch (error: any) {
-                stopPolling(error?.response?.data?.message || error.message, true);
-            }
-        };
-
-        void tick();
-        const interval = setInterval(() => void tick(), POLL_MS);
         return () => clearInterval(interval);
-    }, [fetchProjectData]);
-
-    const handleGenerateVideo = async () => {
-        if (!projectId) return;
-
-        setIsGenerating(true);
-        pollStartedAt.current = Date.now();
-
-        try {
-            const token = await getToken();
-            const { data } = await api.post(
-                "/api/project/video",
-                { projectId },
-                {
-                    headers: authHeaders(token, user?.id),
-                    timeout: 30000,
-                }
-            );
-
-            toast.success(data.message || "Video generation started");
-            startPolling();
-        } catch (error: any) {
-            const status = error?.response?.status;
-            if (status === 202) {
-                toast.success("Video generation in progress");
-                startPolling();
-                return;
-            }
-            stopPolling(error?.response?.data?.message || error.message, true);
-            try {
-                await fetchProjectData();
-            } catch {
-                /* ignore */
-            }
-        }
-    };
-
-    useEffect(() => {
-        if (user && projectId) {
-            setLoading(true);
-            fetchProjectData()
-                .catch((error: any) => {
-                    toast.error(error?.response?.data?.message || error.message);
-                })
-                .finally(() => setLoading(false));
-        } else if (isLoaded && !user) {
-            navigate("/");
-        }
     }, [user, projectId, isLoaded, fetchProjectData, navigate]);
-
-    useEffect(() => {
-        if (user && project?.isGenerating && !pollStartedAt.current) {
-            pollStartedAt.current = Date.now();
-            return startPolling();
-        }
-    }, [user, project?.isGenerating, startPolling]);
 
     return loading ? (
         <div className="h-screen w-full flex items-center justify-center">
             <Loader2Icon className="animate-spin text-indigo- size-9" />
         </div>
     ) : (
-        <div className="min-h-screen  text-white p-6 md:p-12 mt-20">
-            <div className="max-w-6xl mx-auto">
+        <div className="min-h-screen text-white p-6 md:p-12 mt-20">
+            <div className="max-w-4xl mx-auto">
                 <header className="flex justify-between items-center mb-8">
-                    <h1 className="text-2xl md:text-3xl font-medium">Generation Result</h1>
+                    <h1 className="text-2xl md:text-3xl font-medium">Your Image</h1>
                     <Link to="/generate" className="btn-secondary text-sm flex items-center gap-2">
                         <RefreshCwIcon className="w-4 h-4" />
                         <p className="max-sm:hidden">New Generation</p>
                     </Link>
                 </header>
 
-                <div className="grid lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2 space-y-6">
-                        <div className="glass-panel inline-block p-2 rounded-2xl">
-                            <div
-                                className={`${project?.aspectRatio === "16:9" ? "aspect-9/16" : "aspect-video"} sm:max-h-200 rounded-xl bg-gray-900 overflow-hidden relative`}
-                            >
-                                {isGenerating && !project?.generatedVideo ? (
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50 z-10">
-                                        <Loader2Icon className="size-10 animate-spin text-indigo-400" />
-                                        <p className="text-sm text-gray-200">Creating your video…</p>
-                                    </div>
-                                ) : null}
-                                {project?.generatedVideo ? (
-                                    <video
-                                        src={project.generatedVideo}
-                                        controls
-                                        autoPlay
-                                        loop
-                                        className="w-full h-full object-cover"
-                                    />
-                                ) : project?.generatedImage ? (
-                                    <img
-                                        src={project.generatedImage}
-                                        alt="Generated Result"
-                                        className="w-full h-full object-cover"
-                                    />
-                                ) : (
-                                    <div className="w-full h-full min-h-80 flex flex-col items-center justify-center gap-3 p-6 text-center">
-                                        <ImageIcon className="size-8 text-gray-400" />
-                                        <p className="text-sm text-gray-300">
-                                            {project.error || "Image generation failed"}
-                                        </p>
-                                    </div>
-                                )}
+                <div className="glass-panel p-2 rounded-2xl mb-6">
+                    <div
+                        className={`${project?.aspectRatio === "16:9" ? "aspect-video" : "aspect-9/16"} max-h-[70vh] mx-auto rounded-xl bg-gray-900 overflow-hidden relative`}
+                    >
+                        {project.isGenerating && !project.generatedImage ? (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/50 z-10">
+                                <Loader2Icon className="size-10 animate-spin text-indigo-400" />
+                                <p className="text-sm text-gray-200">Generating your image…</p>
                             </div>
-                        </div>
+                        ) : null}
+                        {project?.generatedImage ? (
+                            <img
+                                src={project.generatedImage}
+                                alt="Generated Result"
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            <div className="w-full h-full min-h-80 flex flex-col items-center justify-center gap-3 p-6 text-center">
+                                <ImageIcon className="size-8 text-gray-400" />
+                                <p className="text-sm text-gray-300">
+                                    {project.error || "Image generation failed"}
+                                </p>
+                            </div>
+                        )}
                     </div>
+                </div>
 
-                    <div className="space-y-6">
-                        <div className="glass-panel p-6 rounded-2xl">
-                            <h3 className="text-xl font-semibold mb-4">Actions</h3>
-                            <div className="flex flex-col gap-3">
-                                <a href={project.generatedImage?.replace("/upload", "/upload/fl_attachment")} download>
-                                    <GhostButton
-                                        disabled={!project.generatedImage}
-                                        className="w-full justify-center rounded-md py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <ImageIcon className="size-4.5" />
-                                        Download Image
-                                    </GhostButton>
-                                </a>
-                                <a href={project.generatedVideo?.replace("/upload", "/upload/fl_attachment")} download>
-                                    <GhostButton
-                                        disabled={!project.generatedVideo}
-                                        className="w-full justify-center rounded-md py-3 disabled:opacity-50 disabled:cursor-not-allowed"
-                                    >
-                                        <VideoIcon className="size-4.5" />
-                                        Download Video
-                                    </GhostButton>
-                                </a>
-                            </div>
-                        </div>
-
-                        <div className="glass-panel p-6 rounded-2xl relative overflow-hidden">
-                            <div className="absolute top-0 right-0 p-4 opacity-10">
-                                <VideoIcon className="size-24" />
-                            </div>
-                            <h3 className="text-xl font-semibold mb-2">Video Magic</h3>
-                            <p className="text-gray-400 text-sm mb-6">
-                                Turn this static image into a dynamic video for social media.
-                            </p>
-                            {project.error && !isGenerating && !project.generatedVideo ? (
-                                <p className="text-sm text-red-400 mb-4">{project.error}</p>
-                            ) : null}
-                            {!project.generatedVideo ? (
-                                <PrimaryButton
-                                    onClick={handleGenerateVideo}
-                                    disabled={isGenerating || !project.generatedImage}
-                                    className="w-full"
-                                >
-                                    {isGenerating ? (
-                                        <>
-                                            <Loader2Icon className="size-4 animate-spin" />
-                                            Generating Video…
-                                        </>
-                                    ) : (
-                                        <>
-                                            <SparkleIcon className="size-4" /> Generate Video
-                                        </>
-                                    )}
-                                </PrimaryButton>
-                            ) : (
-                                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-center text-sm font-medium">
-                                    Video Generated Successfully!
-                                </div>
-                            )}
-                        </div>
-                    </div>
+                <div className="glass-panel p-6 rounded-2xl">
+                    <h3 className="text-xl font-semibold mb-4">Download</h3>
+                    <a href={project.generatedImage?.replace("/upload", "/upload/fl_attachment")} download>
+                        <GhostButton
+                            disabled={!project.generatedImage}
+                            className="w-full justify-center rounded-md py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <ImageIcon className="size-4.5" />
+                            Download Image
+                        </GhostButton>
+                    </a>
                 </div>
             </div>
         </div>

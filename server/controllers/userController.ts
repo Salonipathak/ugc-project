@@ -81,8 +81,8 @@ export const toggleProjectPublic = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "Project not found" });
     }
 
-    if (!project?.generatedImage && !project?.generatedVideo) {
-      return res.status(404).json({ message: "image or video not generated" });
+    if (!project?.generatedImage) {
+      return res.status(404).json({ message: "Image not generated yet" });
     }
 
         await prisma.project.update({
