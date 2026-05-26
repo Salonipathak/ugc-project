@@ -1,4 +1,4 @@
-import React, { useState } from "react"
+import React, { startTransition, useState } from "react"
 import Title from "../components/Title"
 import UploadZone from "../components/UploadZone"
 import { Loader2Icon, RectangleHorizontalIcon, RectangleVerticalIcon, Wand2Icon } from "lucide-react"
@@ -11,11 +11,6 @@ import { authHeaders } from "../utils/authHeaders"
 
 
 const Genetator = () => {
-  const tensorArtTemplateId = import.meta.env.VITE_TENSOR_ART_TEMPLATE_ID
-  const tensorArtProductImageNodeId = import.meta.env.VITE_TENSOR_ART_PRODUCT_IMAGE_NODE_ID
-  const tensorArtModelImageNodeId = import.meta.env.VITE_TENSOR_ART_MODEL_IMAGE_NODE_ID
-  const tensorArtPromptNodeId = import.meta.env.VITE_TENSOR_ART_PROMPT_NODE_ID
-
   const {user} = useUser()
   const {getToken} = useAuth()
   const navigate = useNavigate()
@@ -29,12 +24,12 @@ const Genetator = () => {
   const [userPrompt, setUserPrompt] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'product' | 'model')=>{
-    if(e.target.files && e.target.files[0]){
-      if(type === 'product') setProductImage(e.target.files[0]);
-      else setModelImage(e.target.files[0])
-    }
-  }
+  const handleFileSelect = (selected: File, type: 'product' | 'model') => {
+    startTransition(() => {
+      if (type === 'product') setProductImage(selected);
+      else setModelImage(selected);
+    });
+  };
 
   const handleGenerate = async (e: React.FormEvent<HTMLFormElement>)=>{
     e.preventDefault();
@@ -51,10 +46,6 @@ const Genetator = () => {
         formData.append('productDescription', productDescription)
         formData.append('userPrompt', userPrompt)
         formData.append('aspectRatio', aspectRatio)
-        formData.append('tensorArtTemplateId', tensorArtTemplateId)
-        formData.append('tensorArtProductImageNodeId', tensorArtProductImageNodeId)
-        formData.append('tensorArtModelImageNodeId', tensorArtModelImageNodeId)
-        formData.append('tensorArtPromptNodeId', tensorArtPromptNodeId)
         formData.append('images', productImage)
         formData.append('images', modelImage)
 
@@ -85,8 +76,8 @@ const Genetator = () => {
           {/* left col  */}
           <div className="flex flex-col w-full sm:max-w-60 gap-8 mt-8 mb-12">
             
-            <UploadZone label="Product Image" file={productImage} onClear={()=>setProductImage(null)} onChange={(e)=>handleFileChange(e, 'product')}/>
-            <UploadZone label="Model Image" file={modelImage} onClear={()=>setModelImage(null)} onChange={(e)=>handleFileChange(e, 'model')}/>
+            <UploadZone label="Product Image" file={productImage} onClear={() => setProductImage(null)} onSelect={(f) => handleFileSelect(f, 'product')} />
+            <UploadZone label="Model Image" file={modelImage} onClear={() => setModelImage(null)} onSelect={(f) => handleFileSelect(f, 'model')} />
           </div>
 
           {/* right col  */}

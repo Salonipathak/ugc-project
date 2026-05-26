@@ -3,7 +3,7 @@ import Home from './pages/Home';
 import SoftBackdrop from './components/SoftBackdrop';
 import Footer from './components/Footer';
 import LenisScroll from './components/lenis';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 import Genetator from './pages/Genetator';
 import Result from './pages/Result';
 import MyGenerations from './pages/MyGenerations';
@@ -13,11 +13,14 @@ import Loading from './pages/Loading';
 import {Toaster} from 'react-hot-toast'
 
 function App() {
+	const location = useLocation();
+	const useSmoothScroll = location.pathname === '/';
+
 	return (
 		<>	
 			<Toaster toastOptions={{style: {background: '#333', color: "#fff"}}}/>
 			<SoftBackdrop />
-			<LenisScroll />
+			{useSmoothScroll ? <LenisScroll /> : null}
 			<Navbar />
 
 			<Routes>
