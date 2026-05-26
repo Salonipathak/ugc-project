@@ -10,6 +10,7 @@ import {
     buildUgcCompositeUrl,
     generateImageWithPollinations,
 } from './freeGeneration.js';
+import { assertOpenRouterConfigured } from './openrouter.js';
 
 export class OpenRouterCreditError extends Error {
     readonly affordableTokens?: number;
@@ -500,8 +501,10 @@ export const generateImageWithOpenRouter = async (
         throw new Error('Two reference image URLs are required for OpenRouter image generation');
     }
 
-    const configuredMax = Number(process.env.OPENROUTER_IMAGE_MAX_TOKENS || 512);
-    let maxTokens = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 512;
+    await assertOpenRouterConfigured();
+
+    const configuredMax = Number(process.env.OPENROUTER_IMAGE_MAX_TOKENS || 4096);
+    const maxTokens = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : 4096;
 
     try {
         return await requestOpenRouterImage({
@@ -535,7 +538,8 @@ export const generateImageWithOpenRouter = async (
     }
 };
 
-const shouldFallbackToFreeImage = () => process.env.OPENROUTER_FALLBACK_TO_FREE !== 'false';
+/** Off by default — free Pollinations is much lower quality than Gemini. */
+const shouldFallbackToFreeImage = () => process.env.OPENROUTER_FALLBACK_TO_FREE === 'true';
 
 const generateImageWithPollinationsFallback = async (
     uploadedImageUrls: string[],

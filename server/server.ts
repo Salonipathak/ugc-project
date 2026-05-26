@@ -7,6 +7,7 @@ import clerkWebhooks from './controllers/clerk.js';
 import * as Sentry from "@sentry/node"
 import userRouter from "./routes/userRoutes.js";
 import projectRouter from "./routes/projectRoutes.js";
+import { getOpenRouterCreditStatus } from './configs/openrouter.js';
 
 const app = express();
 
@@ -31,6 +32,15 @@ app.use(clerkMiddleware());
 app.get("/", (req: Request, res: Response) => {
   res.send("Server is Live!");
 });
+
+app.get("/api/health/openrouter", async (_req: Request, res: Response) => {
+  try {
+    const status = await getOpenRouterCreditStatus();
+    res.json(status);
+  } catch (error: any) {
+    res.status(500).json({ message: error?.message || "OpenRouter check failed" });
+  }
+});
 app.get("/debug-sentry", function mainHandler(req, res) {
   throw new Error("My first Sentry error!");
 });
@@ -46,7 +56,11 @@ app.use((error: any, req: Request, res: Response, next: any) => {
 
 // The error handler must be registered before any other error middleware and after all controllers
 Sentry.setupExpressErrorHandler(app);
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Server is running at http://localhost:${PORT}`);
+  if (process.env.OPENROUTER_API_KEY?.trim()) {
+    const status = await getOpenRouterCreditStatus();
+    console.log(`[OpenRouter] ${status.message}`);
+  }
 });
 
