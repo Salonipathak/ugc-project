@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import * as Sentry from "@sentry/node"
 import { prisma } from '../configs/prisma.js';
+import { ensureUserRecord } from '../configs/userSync.js';
 
 const isLocalDemoMode = () =>
     process.env.NODE_ENV !== 'production' && process.env.DISABLE_DEMO_AUTH_FALLBACK !== 'true';
@@ -99,6 +100,7 @@ export const protect = async (req: Request, res: Response, next: NextFunction)=>
         }
 
         await ensureDemoCredits(userId);
+        await ensureUserRecord(userId);
 
         next()
     } catch (error: any) {

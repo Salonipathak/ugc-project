@@ -1,19 +1,12 @@
+import './configs/env.js';
 import "./configs/instrument.mjs"
 import express, { Request, Response } from 'express';
 import cors from 'cors'
-import dotenv from 'dotenv'
-import path from 'path'
-import { fileURLToPath } from 'url'
 import { clerkMiddleware } from '@clerk/express'
 import clerkWebhooks from './controllers/clerk.js';
 import * as Sentry from "@sentry/node"
 import userRouter from "./routes/userRoutes.js";
 import projectRouter from "./routes/projectRoutes.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
