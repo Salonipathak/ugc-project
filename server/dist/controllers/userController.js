@@ -1,5 +1,14 @@
 import * as Sentry from "@sentry/node";
-import { prisma } from "../configs/prisma.js";
+import { prisma } from '../configs/prisma.js';
+const isFallbackGeneratedImage = (generatedImage) => {
+    if (!generatedImage)
+        return false;
+    return generatedImage.includes('/upload/') && generatedImage.includes('/l_') && generatedImage.includes('/fl_layer_apply');
+};
+const removeFallbackGeneratedImage = (project) => ({
+    ...project,
+    generatedImage: isFallbackGeneratedImage(project.generatedImage) ? '' : project.generatedImage,
+});
 // Get User Credits
 export const getUserCredits = async (req, res) => {
     try {
@@ -23,9 +32,9 @@ export const getAllProjects = async (req, res) => {
         const { userId } = req.auth();
         const projects = await prisma.project.findMany({
             where: { userId },
-            orderBy: { createdAt: "desc" },
+            orderBy: { createdAt: 'desc' }
         });
-        res.json({ projects });
+        res.json({ projects: projects.map(removeFallbackGeneratedImage) });
     }
     catch (error) {
         Sentry.captureException(error);
@@ -37,13 +46,13 @@ export const getProjectById = async (req, res) => {
     try {
         const { userId } = req.auth();
         const { projectId } = req.params;
-        const project = await prisma.project.findFirst({
-            where: { id: projectId, userId },
+        const project = await prisma.project.findUnique({
+            where: { id: projectId, userId }
         });
         if (!project) {
-            return res.status(404).json({ message: "Project not found" });
+            return res.status(404).json({ message: 'Project not found' });
         }
-        res.json({ project });
+        res.json({ project: removeFallbackGeneratedImage(project) });
     }
     catch (error) {
         Sentry.captureException(error);
@@ -66,7 +75,7 @@ export const toggleProjectPublic = async (req, res) => {
         }
         await prisma.project.update({
             where: { id: projectId },
-            data: { isPublished: !project.isPublished },
+            data: { isPublished: !project.isPublished }
         });
         res.json({ isPublished: !project.isPublished });
     }
