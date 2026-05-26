@@ -2,7 +2,7 @@ import type React from "react";
 import type { Project } from "../types";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { EllipsisIcon, ImageIcon, Loader2Icon, PlaySquareIcon, Share2Icon, Trash2Icon } from "lucide-react";
+import { EllipsisIcon, ImageIcon, Loader2Icon, Share2Icon, Trash2Icon } from "lucide-react";
 import { GhostButton, PrimaryButton } from "./Buttons";
 import { useAuth, useUser } from "@clerk/clerk-react";
 import api from "../configs/axios";
@@ -54,13 +54,15 @@ const ProjectCard = ({ gen, setGenerations, forCommunity = false }: { gen: Proje
             <div className="bg-white/5 border border-white/10 rounded-xl overflow-hidden hover:border-white/20 transition group">
                 {/* preview  */}
                 <div className={`${gen?.aspectRatio === "9:16" ? "aspect-9/16" : "aspect-video"} relative overflow-hidden`}>
-                    {gen.generatedImage && <img src={gen.generatedImage} alt={gen.productName} className={`absolute inset-0 w-full h-full object-cover transition duration-500 ${gen.generatedVideo ? "group-hover:opacity-0" : "group-hover:scale-105"}`} />}
-
-                    {gen.generatedVideo && (
-                        <video src={gen.generatedVideo} muted loop playsInline className="absolute inset-0 w-full h-full object-cover opacity-0 group-hover:opacity-100 transition duration-500" onMouseEnter={(e) => e.currentTarget.play()} onMouseLeave={(e) => e.currentTarget.pause()} />
+                    {gen.generatedImage && (
+                        <img
+                            src={gen.generatedImage}
+                            alt={gen.productName}
+                            className="absolute inset-0 w-full h-full object-cover transition duration-500 group-hover:scale-105"
+                        />
                     )}
 
-                    {!gen?.generatedImage && !gen?.generatedVideo && (
+                    {!gen?.generatedImage && (
                         <div className="absolute inset-0 w-full h-full flex flex-col items-center justify-center gap-3 bg-black/20 p-5 text-center">
                             {gen.isGenerating ? <Loader2Icon className="size-7 animate-spin" /> : <ImageIcon className="size-7 text-gray-400" />}
                             {!gen.isGenerating && <p className="text-xs text-gray-300">{gen.error || "Image generation failed"}</p>}
@@ -96,14 +98,8 @@ const ProjectCard = ({ gen, setGenerations, forCommunity = false }: { gen: Proje
                                         </a>
                                     )}
 
-                                    {gen.generatedVideo && (
-                                        <a href={gen.generatedVideo?.replace("/upload", "/upload/fl_attachment")} download className="flex gap-2 items-center px-4 py-2 hover:bg-black/10 cursor-pointer">
-                                            <PlaySquareIcon size={14} /> Download Video
-                                        </a>
-                                    )}
-
-                                    {(gen.generatedVideo || gen.generatedImage) && (
-                                        <button onClick={() => navigator.share({ url: gen.generatedVideo || gen.generatedImage, title: gen.productName, text: gen.productDescription })} className="w-full flex gap-2 items-center px-4 py-2 hover:bg-black/10 cursor-pointer">
+                                    {gen.generatedImage && (
+                                        <button onClick={() => navigator.share({ url: gen.generatedImage, title: gen.productName, text: gen.productDescription })} className="w-full flex gap-2 items-center px-4 py-2 hover:bg-black/10 cursor-pointer">
                                             <Share2Icon size={14} /> Share
                                         </button>
                                     )}

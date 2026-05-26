@@ -1,7 +1,6 @@
 import express from "express";
 import {
   createProject,
-  createVideo,
   deleteProject,
   getAllPublishedProjects,
 } from "../controllers/projectController.js";
@@ -16,7 +15,6 @@ projectRouter.post(
   upload.array("images", 2),
   createProject,
 );
-projectRouter.post("/video", protect, createVideo);
 projectRouter.get("/published", getAllPublishedProjects);
 projectRouter.delete("/:projectId", protect, deleteProject);
 
